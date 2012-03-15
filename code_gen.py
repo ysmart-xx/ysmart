@@ -37,6 +37,8 @@ rel_func_dict = {"EQ":" == ","GTH":" > ", "LTH":" < ","NOT_EQ":" != ","GEQ":" >=
 packagepath = "edu/osu/cse/ysmart/"
 packagename = "edu.osu.cse.ysmart"
 
+use_hcatalog = True
+
 
 ###__select_func_convert_to_java__ is mainly used to convert the math function in the select list into jave expression
 ####input: @exp: the sql expression than you want to translate. If the exp is an agg operation, it will return the jave exp of its argument
@@ -403,7 +405,48 @@ def __gen_header__(fo):
     print >>fo, "import org.apache.hadoop.mapreduce.lib.input.FileSplit;"
     print >>fo, "import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;"
     print >>fo, "import org.apache.hadoop.mapreduce.lib.partition.*;"
+
+    hcat_dep = {}
+    hcat_dep['org.apache.hcatalog'] = []
+    hcat_dep['org.apache.hcatalog'].append('common.HCatConstants')
+    hcat_dep['org.apache.hcatalog'].append('data.HCatRecord')
+    hcat_dep['org.apache.hcatalog'].append('data.schema.HCatSchema')
+    hcat_dep['org.apache.hcatalog'].append('mapreduce.HCatInputFormat')
+    hcat_dep['org.apache.hcatalog'].append('mapreduce.HCatTableInfo')
+
+    if use_hcatalog:
+        for parent, children in hcat_dep.items():
+            for child in children:
+                print >>fo, 'import ' + '.'.join([parent, child]) + ";"
+
     print >>fo,"\n"
+
+# If you have some work in common, then put it in a function
+# If you have some data in common, then put it in a class
+
+def indent_and_write(fo, indent_level, out):
+    print >>fo,"\t" * indent_level + out
+
+def convert_hcatrecord_to_string(fo, value, indent_level = 3, max_index = -1):
+    old_indent = indent_level
+    if max_index < 0:
+        max_index = "r.size()"
+    indent_and_write(fo, indent_level, "String line = null;")
+    indent_and_write(fo, indent_level, "if (" + value + " instanceof String) {")
+    indent_level += 1
+    indent_and_write(fo, indent_level, "line = " + value + ".toString();")
+    indent_level -= 1
+    indent_and_write(fo, indent_level, "} else if (" + value + " instanceof HCatRecord) {")
+    indent_level += 1
+    indent_and_write(fo, indent_level, "HCatRecord r = (HCatRecord)value;")
+    indent_and_write(fo, indent_level, "for (int i = 0; i < " + str(max_index) + "; i++) {")
+    indent_level += 1
+    indent_and_write(fo, indent_level, "line += r.get(i).toString() + \"|\";")
+    indent_level -= 1
+    indent_and_write(fo, indent_level, "}")
+    indent_level -= 1
+    indent_and_write(fo, indent_level, "}")
+    return old_indent
 
 def __gen_mr_key__(exp_list,type,buf_dict):
 
@@ -536,11 +579,12 @@ def __tablenode_gen_mr__(tree,fo):
     max_index = __get_max_index__(tree.select_list.tmp_exp_list) 
 
 
-    print >>fo,"\tpublic static class Map extends Mapper<Object, Text,"+map_key_type+","+map_value_type+">{\n"
+    print >>fo,"\tpublic static class Map extends Mapper<Object, Object,"+map_key_type+","+map_value_type+">{\n"
 
-    print >>fo,"\t\tpublic void map(Object key, Text value, Context context) throws IOException,InterruptedException{\n"
+    print >>fo,"\t\tpublic void map(Object key, Object value, Context context) throws IOException,InterruptedException{\n"
     
-    print >>fo,"\t\t\tString line = value.toString();"
+    #print >>fo,"\t\t\tString line = value.toString();"
+    convert_hcatrecord_to_string(fo, "value", 3)
 
     print >>fo,"\t\t\tString[] "+ line_buffer +" = new String["+ str(max_index)+"];"
     print >>fo, "\t\t\tint prev=0,i=0,n=0;"
@@ -629,11 +673,12 @@ def __orderby_gen_mr__(tree,fo):
         max_index = len(tree.child.select_list.tmp_exp_list)
 
 
-    print >>fo,"\tpublic static class Map extends  Mapper<Object, Text,"+map_key_type+","+map_value_type+">{\n"
+    print >>fo,"\tpublic static class Map extends Mapper<Object, Object,"+map_key_type+","+map_value_type+">{\n"
 
-    print >>fo,"\t\tpublic void map(Object key, Text value, Context context) throws IOException,InterruptedException{\n"
+    print >>fo,"\t\tpublic void map(Object key, Object value, Context context) throws IOException,InterruptedException{\n"
     
-    print >>fo,"\t\t\tString line = value.toString();"
+    #print >>fo,"\t\t\tString line = value.toString();"
+    convert_hcatrecord_to_string(fo, "value", 3)
 
     print >>fo,"\t\t\tString[] "+ line_buffer +" = new String["+ str(max_index)+"];"
     print >>fo, "\t\t\tint prev=0,i=0,n=0;"
@@ -800,7 +845,7 @@ def __groupby_gen_mr__(tree,fo):
             if ystree.__groupby_func_name__(exp) == "AVG":
                 map_value_type = "Text"
 
-    print >>fo,"\tpublic static class Map extends Mapper<Object, Text,"+ map_key_type+","+map_value_type+">{\n"
+    print >>fo,"\tpublic static class Map extends Mapper<Object, Object,"+ map_key_type+","+map_value_type+">{\n"
 
     adv_gb_output = "adv_gb_output"
     adv_count_output = "adv_count_output"
@@ -854,8 +899,9 @@ def __groupby_gen_mr__(tree,fo):
         print >>fo,"\t\t\t}"
         print >>fo,"\t\t}"
 
-    print >>fo,"\t\tpublic void map(Object key, Text value, Context context) throws IOException,InterruptedException{\n"
-    print >>fo,"\t\t\tString line = value.toString();"
+    print >>fo,"\t\tpublic void map(Object key, Object value, Context context) throws IOException,InterruptedException{\n"
+    #print >>fo,"\t\t\tString line = value.toString();"
+    convert_hcatrecord_to_string(fo, "value", 3)
     print >>fo,"\t\t\tString[] "+ line_buffer +" = new String["+ str(max_index)+"];"
     print >>fo, "\t\t\tint prev=0,i=0,n=0;"
     print >>fo, "\t\t\tfor(i=0,n=0,prev=0;i<line.length();i++){\n"
@@ -1443,9 +1489,10 @@ def __join_gen_mr__(tree,left_name,fo):
     print >>fo, "\t\t\t\tleft = 1;"
     print >>fo,"\t\t}" 
 
-    print >>fo,"\t\tpublic void map(Object key, Text value,Context context) throws IOException,InterruptedException{\n"
+    print >>fo,"\t\tpublic void map(Object key, Object value,Context context) throws IOException,InterruptedException{\n"
     
-    print >>fo,"\t\t\tString line = value.toString();"
+    #print >>fo,"\t\t\tString line = value.toString();"
+    convert_hcatrecord_to_string(fo, "value", 3)
         
     print >>fo, "\t\t\tint prev=0,i=0,n=0;"
 
@@ -1972,8 +2019,10 @@ def __composite_gen_mr__(tree,fo):
         print >>fo, "\t\t\t}"
     print >>fo,"\t\t}\n" 
 
-    print >>fo,"\t\tpublic void map(Object key, Text value,Context context) throws IOException,InterruptedException{\n"
-    print >>fo,"\t\t\tString line = value.toString();"
+    print >>fo,"\t\tpublic void map(Object key, Object value,Context context) throws IOException,InterruptedException{\n"
+    #print >>fo,"\t\t\tString line = value.toString();"
+
+    convert_hcatrecord_to_string(fo, "value", 3)
     print >>fo,"\t\t\tString[] " + line_buffer + "= line.split(\"\\\|\");"
     print >>fo,"\t\t\tBitSet dispatch = new BitSet(32);"
 
