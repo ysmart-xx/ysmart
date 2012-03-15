@@ -425,13 +425,14 @@ def __gen_header__(fo):
 # If you have some data in common, then put it in a class
 
 def indent_and_write(fo, indent_level, out):
-    print >>fo,"\t" * indent_level + out
+    for i in out.split('\n'):
+        print >>fo,"\t" * indent_level + i.strip()
 
 def convert_hcatrecord_to_string(fo, value, indent_level = 3, max_index = -1):
     old_indent = indent_level
     if max_index < 0:
         max_index = "r.size()"
-    indent_and_write(fo, indent_level, "String line = null;")
+    indent_and_write(fo, indent_level, "String line = \"\";")
     indent_and_write(fo, indent_level, "if (" + value + " instanceof String) {")
     indent_level += 1
     indent_and_write(fo, indent_level, "line = " + value + ".toString();")
@@ -2798,7 +2799,19 @@ def __composite_gen_mr__(tree,fo):
 
     __gen_main__(tree,fo,map_key_type,map_value_type,reduce_key_type,reduce_value_type,False)
 
-    
+
+def _write_input_format(fo, indent_level, argvidx, hcat = True):
+    if hcat:
+        indent_and_write(fo, indent_level, "tableName = args[" + str(argvidx) + "];")
+        indent_and_write(fo, indent_level, '''
+            HCatTableInfo info = HCatTableInfo.getInputTableInfo(serverUri, principalID, dbName, tableName);
+            HCatInputFormat.setInput(job, info);
+            HCatSchema s = HCatInputFormat.getTableSchema(job);
+            HCatInputFormat.setOutputSchema(job, s);
+            job.setInputFormatClass(HCatInputFormat.class);
+            ''')
+    else:
+        indent_and_write(fo, indent_level, "FileInputFormat.addInputPath(job,new Path(args[" + str(argvidx) + "]));")
 
 def __gen_main__(tree,fo,map_key_type,map_value_type,reduce_key_type,reduce_value_type,reduce_bool):
     print >>fo,"\tpublic int run(String[] args) throws Exception{\n"
@@ -2813,20 +2826,43 @@ def __gen_main__(tree,fo,map_key_type,map_value_type,reduce_key_type,reduce_valu
     print >>fo,"\t\tjob.setOutputValueClass("+reduce_value_type+".class);"
     print >>fo,"\t\tjob.setMapperClass(Map.class);"
     print >>fo,"\t\tjob.setReducerClass(Reduce.class);"
+
+    indent_level = 2
+    adjust = 0
+    idx = 0
+    if use_hcatalog:
+        indent_and_write(fo, indent_level, '''
+            String serverUri = args[2];
+            String dbName = args[1];
+            String principalID = System.getProperty(HCatConstants.HCAT_METASTORE_PRINCIPAL);
+            if(principalID != null)
+                conf.set(HCatConstants.HCAT_METASTORE_PRINCIPAL, principalID);
+
+            String tableName = "";
+            ''')
+        idx = 3
+        adjust = 2
+
     if reduce_bool is True:
         print >>fo,"\t\tjob.setReducerClass(Reduce.class);"
     if isinstance(tree,ystree.TwoJoinNode):
-        print >>fo, "\t\tFileInputFormat.addInputPath(job,new Path(args[0]));"
-        print >>fo, "\t\tFileInputFormat.addInputPath(job,new Path(args[1]));"
-        print >>fo,"\t\tFileOutputFormat.setOutputPath(job, new Path(args[2]));"
+        _write_input_format(fo, indent_level, idx, use_hcatalog)
+        _write_input_format(fo, indent_level, idx + 1, use_hcatalog)
+        idx += 2
+        #print >>fo, "\t\tFileInputFormat.addInputPath(job,new Path(args[0]));"
+        #print >>fo, "\t\tFileInputFormat.addInputPath(job,new Path(args[1]));"
+        print >>fo,"\t\tFileOutputFormat.setOutputPath(job, new Path(args[" + str(idx) + "]));"
     elif isinstance(tree,ystree.CompositeNode):
         in_len = len(tree.mapoutput.keys())
         for i in range(0,in_len):
-            print >>fo,"\t\tFileInputFormat.addInputPath(job,new Path(args["+str(i)+"]));"
-        print >>fo,"\t\tFileOutputFormat.setOutputPath(job, new Path(args[" + str(in_len) + "]));";
+            _write_input_format(fo, indent_level, i + adjust, use_hcatalog)
+            #print >>fo,"\t\tFileInputFormat.addInputPath(job,new Path(args["+str(i)+"]));"
+        print >>fo,"\t\tFileOutputFormat.setOutputPath(job, new Path(args[" + str(in_len + adjust) + "]));";
     else:
-        print >>fo,"\t\tFileInputFormat.addInputPath(job, new Path(args[0]));"
-        print >>fo,"\t\tFileOutputFormat.setOutputPath(job, new Path(args[1]));"
+        _write_input_format(fo, indent_level, idx, use_hcatalog)
+        print >>fo,"\t\tFileOutputFormat.setOutputPath(job, new Path(args[" + str(idx + 1) + "]));";
+        #print >>fo,"\t\tFileInputFormat.addInputPath(job, new Path(args[0]));"
+        #print >>fo,"\t\tFileOutputFormat.setOutputPath(job, new Path(args[1]));"
     print >>fo,"\t\treturn (job.waitForCompletion(true) ? 0 : 1);"
 
     print >>fo,"\t}\n"
