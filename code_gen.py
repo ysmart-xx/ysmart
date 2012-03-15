@@ -2804,9 +2804,9 @@ def _write_input_format(fo, indent_level, argvidx, hcat = True):
     if hcat:
         indent_and_write(fo, indent_level, "tableName = args[" + str(argvidx) + "];")
         indent_and_write(fo, indent_level, '''
-            HCatTableInfo info = HCatTableInfo.getInputTableInfo(serverUri, principalID, dbName, tableName);
+            info = HCatTableInfo.getInputTableInfo(serverUri, principalID, dbName, tableName);
             HCatInputFormat.setInput(job, info);
-            HCatSchema s = HCatInputFormat.getTableSchema(job);
+            s = HCatInputFormat.getTableSchema(job);
             HCatInputFormat.setOutputSchema(job, s);
             job.setInputFormatClass(HCatInputFormat.class);
             ''')
@@ -2839,6 +2839,8 @@ def __gen_main__(tree,fo,map_key_type,map_value_type,reduce_key_type,reduce_valu
                 conf.set(HCatConstants.HCAT_METASTORE_PRINCIPAL, principalID);
 
             String tableName = "";
+            HCatTableInfo info = null;
+            HCatSchema s = null;
             ''')
         idx = 3
         adjust = 2
